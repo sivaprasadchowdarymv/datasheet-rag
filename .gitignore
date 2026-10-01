@@ -1,0 +1,25 @@
+# secrets
+.env
+.streamlit/secrets.toml
+*.pem
+*.key
+
+# runtime data (documents, indexes, feedback, caches)
+data/
+cache/
+.rag_cache/
+benchmark_results/
+figures/
+*.pdf
+feedback.json
+
+# python / tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.ipynb_checkpoints/
+.DS_Store
+.idea/
+.vscode/

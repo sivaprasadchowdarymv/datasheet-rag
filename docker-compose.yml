@@ -1,0 +1,61 @@
+# Full self-hosted stack for ONE always-on machine (e.g. Oracle Cloud Always Free
+# Ampere A1 VM, or a spare PC). Everything open-source, no paid API.
+#
+#   docker compose up -d                       # app + ollama, http://<ip>:8501
+#   docker compose --profile https up -d       # + Caddy automatic HTTPS (needs DOMAIN)
+#   ./scripts/pull_models.sh                   # download the models once
+#
+# Settings come from .env (copy .env.example). Data lives in named volumes and
+# survives restarts and image upgrades.
+services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=30m
+      - OLLAMA_NUM_PARALLEL=1
+    # NOT published to the internet: only the app container can reach it.
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - APP_MODE=${APP_MODE:-local}
+      - OLLAMA_HOST=http://ollama:11434
+      - LLM_MODEL=${LLM_MODEL:-mistral}
+      - ENABLE_VISION=${ENABLE_VISION:-false}   # llava:7b is heavy on a 2-core VM
+      - DATA_DIR=/app/data
+      - CACHE_DIR=/app/cache
+    volumes:
+      - appdata:/app/data
+      - appcache:/app/cache
+    ports:
+      - "${APP_PORT:-8501}:8501"
+
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      - DOMAIN=${DOMAIN:?set DOMAIN in .env for HTTPS}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+
+volumes:
+  ollama:
+  appdata:
+  appcache:
+  caddy_data:

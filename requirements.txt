@@ -1,0 +1,14 @@
+# Runtime dependencies — versions pinned to the set the test-suite passed with
+# (Python 3.12). Works on x86_64 and ARM64 (Oracle Ampere) Linux, macOS, Windows.
+streamlit==1.64.0
+pymupdf==1.28.2          # PDF parsing, tables, figures (AGPL-3.0 — see README "Licences")
+numpy==2.4.4
+pandas==3.0.2
+faiss-cpu==1.15.1        # persistent vector index
+fastembed==0.8.1         # in-process ONNX embeddings + cross-encoder reranker (cloud mode)
+onnxruntime==1.24.4
+rapidfuzz==3.14.6        # fuzzy matching of part numbers / symbols
+httpx==0.28.1            # OpenAI-compatible streaming client (llama.cpp, vLLM, Ollama /v1)
+ollama==0.6.3            # local mode: mistral, nomic-embed-text, llava:7b
+huggingface_hub==1.33.0  # optional persistence: private HF dataset mirror
+python-dotenv==1.2.2

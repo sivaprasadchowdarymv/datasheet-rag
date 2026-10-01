@@ -1,0 +1,5 @@
+# Automatic HTTPS (Let's Encrypt) in front of Streamlit; websockets pass through.
+{$DOMAIN} {
+    encode gzip
+    reverse_proxy app:8501
+}

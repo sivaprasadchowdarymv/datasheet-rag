@@ -1,0 +1,17 @@
+[server]
+maxUploadSize = 50          # MB — keep equal to MAX_UPLOAD_MB
+enableXsrfProtection = true
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "dark"
+primaryColor = "#4f8ef7"
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#161b22"
+textColor = "#e6edf3"
+
+[client]
+showErrorDetails = false    # never leak stack traces to the public
