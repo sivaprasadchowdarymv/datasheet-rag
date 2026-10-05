@@ -1,0 +1,23 @@
+# Caddyfile WITH the protected LLM endpoint (Implementation 10).
+# Copy over the normal one:   cp Caddyfile.llm Caddyfile
+# Needs DOMAIN, LLM_DOMAIN and LLM_API_KEY in .env.
+
+# 1) the web app
+{$DOMAIN} {
+    encode gzip
+    reverse_proxy app:8501
+}
+
+# 2) OpenAI-compatible endpoint of the VM's Ollama, for the public Streamlit app.
+#    Only requests carrying the right key AND only /v1/* paths get through,
+#    so nobody can pull or delete models over the internet.
+{$LLM_DOMAIN} {
+    @authorized {
+        header Authorization "Bearer {$LLM_API_KEY}"
+        path /v1/*
+    }
+    handle @authorized {
+        reverse_proxy ollama:11434
+    }
+    respond "Unauthorized" 401
+}

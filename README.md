@@ -225,6 +225,12 @@ variable, a Streamlit secret or `.env` (that order). Most useful keys:
 | `MAX_UPLOAD_MB`, `MAX_PAGES`, `QUERIES_PER_MINUTE` | 50, 400, 10 | abuse limits |
 | `ADMIN_PASSWORD`, `PUBLIC_UPLOADS` | —, true | protect uploads/deletes |
 
+**Several answer models (e.g. Kimi).** Besides the main LLM you can offer up to four
+more in a sidebar menu "Answer model" with `LLM2_LABEL`, `LLM2_BASE_URL`, `LLM2_MODEL`,
+`LLM2_API_KEY` … `LLM5_*`. Every visitor picks per question; retrieval, citations and the
+NOT FOUND gate are identical for all of them, and "Extractive" is always offered.
+Switching models never reloads the embedding or reranker models.
+
 Changing the embedding model is safe: vectors are stored per model namespace and are
 rebuilt from stored chunks (no PDF re-parse).
 

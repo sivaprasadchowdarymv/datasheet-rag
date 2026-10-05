@@ -20,7 +20,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from storage.backends import StorageBackend, LocalStorage
 from storage.cache import FeedbackStore, QueryCache
@@ -49,6 +49,9 @@ class IngestionError(Exception):
     """Human-readable ingestion failure."""
 
 
+_DEFAULT_LLM = object()   # sentinel: "use the pipeline's own LLM"
+
+
 @dataclass
 class Engines:
     embedder: EmbeddingEngine
@@ -66,14 +69,22 @@ class Engines:
         }
 
 
-def build_engines(settings) -> Engines:
+def build_llm(settings) -> Tuple[Optional[LLMEngine], str]:
+    """The answer model alone (cheap to create), so switching models never reloads embeddings."""
+    try:
+        return create_llm_engine(settings), ""
+    except LLMError as e:
+        return None, f"{e} Falling back to extractive answers."
+
+
+def build_engines(settings, include_llm: bool = True) -> Engines:
     warnings: List[str] = []
     embedder = create_embedding_engine(settings)          # failures here are fatal → shown in UI
-    try:
-        llm = create_llm_engine(settings)
-    except LLMError as e:
-        llm = None
-        warnings.append(f"{e} Falling back to extractive answers.")
+    llm = None
+    if include_llm:
+        llm, w = build_llm(settings)
+        if w:
+            warnings.append(w)
     reranker, w = create_reranker(settings)
     if w:
         warnings.append(w)
@@ -227,17 +238,21 @@ class RAGPipeline:
         return self._lexical[key]
 
     # ================================================================ query
-    def fingerprint(self) -> str:
+    def fingerprint(self, llm: Optional[LLMEngine] = None) -> str:
         s = self.s
         return "|".join(map(str, [
-            s.chunker_signature, self.namespace, self.e.llm.name if self.e.llm else "extractive",
+            s.chunker_signature, self.namespace, llm.name if llm else "extractive",
             self.e.reranker.name, s.top_k_retrieval, s.top_k_fusion, s.top_k_final, s.rerank_min_score,
             s.dense_min_score, s.lexical_min_coverage, self.e.vision.name if self.e.vision else "novision",
         ]))
 
     def answer(self, question: str, doc_ids: Sequence[str], history: Optional[List[str]] = None,
                on_token: Optional[TokenFn] = None, on_status: Optional[Callable[[str], None]] = None,
-               use_cache: bool = True) -> AnswerResult:
+               use_cache: bool = True, llm: Any = _DEFAULT_LLM) -> AnswerResult:
+        """llm: the answer model for this question (None = extractive). Omitted → the
+        pipeline's own engine. Passing it per call lets every user pick a model without
+        duplicating the loaded indexes."""
+        llm = self.e.llm if llm is _DEFAULT_LLM else llm
         status = on_status or (lambda m: None)
         history = history or []
         T: Dict[str, float] = {}
@@ -254,7 +269,7 @@ class RAGPipeline:
                                 timings={"total": round(time.perf_counter() - t_start, 3)})
 
         # 2. query cache --------------------------------------------------------------
-        key = QueryCache.make_key(question, doc_ids, self.fingerprint(), history)
+        key = QueryCache.make_key(question, doc_ids, self.fingerprint(llm), history)
         if use_cache and self.s.enable_query_cache:
             hit = self.cache.get(key)
             if hit:
@@ -345,12 +360,12 @@ class RAGPipeline:
         t = time.perf_counter()
         answer = ""
         first_token_at: Optional[float] = None
-        if self.e.llm:
+        if llm:
             status("Generating…")
             msgs = build_messages(question, blocks, history)
             try:
                 parts: List[str] = []
-                for delta in self.e.llm.stream(msgs):
+                for delta in llm.stream(msgs):
                     if first_token_at is None:
                         first_token_at = time.perf_counter()
                     parts.append(delta)
@@ -499,8 +514,9 @@ class RAGPipeline:
         return changed
 
     # ================================================================ health
-    def health(self) -> Dict[str, str]:
+    def health(self, llm: Any = _DEFAULT_LLM) -> Dict[str, str]:
+        llm = self.e.llm if llm is _DEFAULT_LLM else llm
         out = {"embedding": self.e.embedder.health()}
-        out["llm"] = self.e.llm.health() if self.e.llm else ""
+        out["llm"] = llm.health() if llm else ""
         out["storage"] = self.storage.last_error
         return out

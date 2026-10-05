@@ -15,7 +15,7 @@ import os
 import re
 from dataclasses import dataclass, field, asdict, replace
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
@@ -129,6 +129,10 @@ class Settings:
     llm_max_tokens: int = 700
     llm_num_ctx: int = 4096               # Ollama context window
     llm_timeout_s: int = 180
+    llm_label: str = ""                   # display name of the primary LLM in the "Answer model" menu
+    # Extra answer models offered in the sidebar menu: (label, provider, base_url, model, api_key).
+    # Filled from LLM2_* … LLM5_* settings, e.g. Kimi via OpenRouter or Ollama Cloud.
+    llm_choices: Tuple[Tuple[str, str, str, str, str], ...] = ()
 
     embedding_provider: str = "ollama"    # ollama | fastembed | sentence_transformers | hash
     embedding_model: str = "nomic-embed-text"
@@ -213,7 +217,30 @@ class Settings:
         d = asdict(self)
         for secret in ("llm_api_key", "hf_token", "admin_password", "ollama_auth_header"):
             d[secret] = "•••" if d.get(secret) else ""
+        d["llm_choices"] = [[c[0], c[1], c[2], c[3], "•••" if c[4] else ""] for c in self.llm_choices]
         return d
+
+
+def _llm_choices(m: str, primary_base: str, primary_key: str) -> Tuple[Tuple[str, str, str, str, str], ...]:
+    """LLM2_* … LLM5_*: extra answer models selectable in the sidebar.
+
+    LLMn_MODEL      required, e.g. moonshotai/kimi-k2.6:free  or  kimi-k2.6:cloud
+    LLMn_LABEL      shown in the menu (default: the model name)
+    LLMn_BASE_URL   OpenAI-compatible URL ending in /v1; empty → same server as the main LLM,
+                    or local Ollama when the main LLM has no URL either
+    LLMn_API_KEY    empty → reuse the main key when the URL is the same server
+    """
+    out = []
+    for i in range(2, 6):
+        model = _raw(f"LLM{i}_MODEL", m).strip()
+        if not model:
+            continue
+        base = _raw(f"LLM{i}_BASE_URL", m).strip().rstrip("/") or primary_base
+        key = _raw(f"LLM{i}_API_KEY", m).strip() or (primary_key if base == primary_base else "")
+        provider = "openai_compat" if base else "ollama"
+        label = _raw(f"LLM{i}_LABEL", m).strip() or model
+        out.append((label, provider, base, model, key))
+    return tuple(out)
 
 
 def load_settings(mode: str | None = None) -> Settings:
@@ -235,6 +262,8 @@ def load_settings(mode: str | None = None) -> Settings:
         llm_max_tokens=_int("LLM_MAX_TOKENS", m, 700),
         llm_num_ctx=_int("LLM_NUM_CTX", m, 4096),
         llm_timeout_s=_int("LLM_TIMEOUT_S", m, 180),
+        llm_label=_raw("LLM_LABEL", m),
+        llm_choices=_llm_choices(m, _raw("LLM_BASE_URL", m).rstrip("/"), _raw("LLM_API_KEY", m)),
         embedding_provider=_raw("EMBEDDING_PROVIDER", m, "ollama").lower(),
         embedding_model=_raw("EMBEDDING_MODEL", m, "nomic-embed-text"),
         embed_batch_size=_int("EMBED_BATCH_SIZE", m, 32),

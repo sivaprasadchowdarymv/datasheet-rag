@@ -64,7 +64,7 @@
 | `ui/components.py` | Escaped answer HTML, NOT FOUND box, source cards, metrics, document stats, browse panel | `app` |
 | `benchmark.py` | Measured v3 vs v4 comparison (timings, chunk stats, hit rates) | standalone |
 | `tests/*` | Offline test-suite with synthetic datasheets; AppTest UI smoke test | `pytest` |
-| `Dockerfile`, `docker-compose.yml`, `Caddyfile`, `scripts/*` | Self-hosting on an always-on VM (Ollama + app + optional HTTPS) | deployment |
+| `Dockerfile`, `docker-compose.yml`, `Caddyfile`, `Caddyfile.llm`, `scripts/*` | Self-hosting on an always-on VM (Ollama + app + optional HTTPS) | deployment |
 | `.streamlit/config.toml`, `.streamlit/secrets.toml.example`, `.env.example`, `.gitignore` | Runtime/UI config, secret templates, keep secrets and data out of git | deployment |
 
 ## Storage layout

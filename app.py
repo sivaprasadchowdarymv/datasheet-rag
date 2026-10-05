@@ -25,7 +25,7 @@ st.set_page_config(page_title="RAG Agent", page_icon="📡", layout="wide")
 
 from config import PROFILES, Settings, load_settings  # noqa: E402
 from rag.embeddings import EmbeddingError  # noqa: E402
-from rag.pipeline import Engines, IngestionError, RAGPipeline, build_engines  # noqa: E402
+from rag.pipeline import Engines, IngestionError, RAGPipeline, build_engines, build_llm  # noqa: E402
 from rag.schema import AnswerResult  # noqa: E402
 from rag.security import RateLimiter, sanitize_query  # noqa: E402
 from storage.backends import create_storage  # noqa: E402
@@ -44,13 +44,40 @@ ENGINE_FIELDS = ("app_mode", "llm_provider", "llm_model", "llm_base_url", "llm_a
                  "llm_num_ctx", "llm_max_tokens", "llm_temperature", "max_concurrent_generations")
 
 
+LLM_FIELDS = ("llm_provider", "llm_model", "llm_base_url", "llm_api_key", "llm_timeout_s", "llm_num_ctx",
+              "llm_max_tokens", "llm_temperature", "max_concurrent_generations", "ollama_host", "ollama_auth_header")
+HEAVY_FIELDS = tuple(f for f in ENGINE_FIELDS if f not in LLM_FIELDS or f in ("ollama_host", "ollama_auth_header"))
+
+
 def engine_key(s: Settings) -> Tuple:
-    return tuple(getattr(s, f) for f in ENGINE_FIELDS)
+    """Embeddings / reranker / vision only — the answer model is cached separately so that
+    switching it in the sidebar never reloads (or duplicates) the heavy models."""
+    return tuple(getattr(s, f) for f in HEAVY_FIELDS)
+
+
+def llm_key(s: Settings) -> Tuple:
+    return tuple(getattr(s, f) for f in LLM_FIELDS)
 
 
 @st.cache_resource(show_spinner="Loading models (first start can take a minute)…", max_entries=3)
 def get_engines(key: Tuple, _settings: Settings) -> Engines:
-    return build_engines(_settings)
+    return build_engines(_settings, include_llm=False)
+
+
+@st.cache_resource(max_entries=8)
+def get_llm(key: Tuple, _settings: Settings):
+    return build_llm(_settings)
+
+
+def answer_model_options(s: Settings) -> List[Tuple[str, str, str, str, str]]:
+    """(label, provider, base_url, model, api_key) for the "Answer model" menu."""
+    opts: List[Tuple[str, str, str, str, str]] = []
+    p = s.resolved_llm_provider
+    if p != "extractive":
+        opts.append((s.llm_label or f"{s.llm_model} ({p})", p, s.llm_base_url, s.llm_model, s.llm_api_key))
+    opts += list(s.llm_choices)
+    opts.append(("Extractive (no LLM, verbatim excerpts)", "extractive", "", "", ""))
+    return opts
 
 
 @st.cache_resource(show_spinner="Restoring document library…")
@@ -68,8 +95,8 @@ def get_pipeline(settings_key: str, _settings: Settings, _engines: Engines) -> R
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def cached_health(key: str, _pipe: RAGPipeline) -> Dict[str, str]:
-    return _pipe.health()
+def cached_health(key: str, _pipe: RAGPipeline, _llm) -> Dict[str, str]:
+    return _pipe.health(llm=_llm)
 
 
 @st.cache_resource
@@ -103,7 +130,18 @@ with st.sidebar:
                 st.toast("Admin unlocked" if ss.admin else "Wrong password")
                 st.rerun()
 
-    st.caption(f"LLM: **{S.resolved_llm_provider}** {S.llm_model if S.resolved_llm_provider != 'extractive' else ''}")
+    options = answer_model_options(S)
+    if len(options) > 1:
+        labels = [o[0] for o in options]
+        prev = ss.get("answer_model")
+        choice = st.selectbox("🧠 Answer model", labels, index=labels.index(prev) if prev in labels else 0,
+                              help="Which model writes the answer. Retrieval, citations and the NOT FOUND check "
+                                   "are identical for every choice. Extractive = exact sentences, no LLM.")
+        ss.answer_model = choice
+        _, prov, base, model, key = options[labels.index(choice)]
+        S = S.with_overrides(llm_provider=prov, llm_base_url=base, llm_model=model or S.llm_model, llm_api_key=key)
+    else:
+        st.caption("LLM: **extractive** (no LLM configured)")
     if ss.admin and S.resolved_llm_provider == "ollama":
         S = S.with_overrides(llm_model=st.text_input("Ollama LLM model", S.llm_model,
                                                      help="Any model you have pulled: mistral, llama3.1, qwen2.5:7b, phi3 …"))
@@ -130,6 +168,8 @@ with st.sidebar:
 # ============================================================== engines + pipeline
 try:
     engines = get_engines(engine_key(S), S)
+    _llm, _llm_warning = get_llm(llm_key(S), S)
+    engines = replace(engines, llm=_llm, warnings=engines.warnings + ([_llm_warning] if _llm_warning else []))
 except EmbeddingError as e:
     st.error(f"**Embedding model could not be loaded.** {e}")
     st.stop()
@@ -149,7 +189,7 @@ limiter = get_rate_limiter(S.queries_per_minute)
 
 with st.sidebar:
     st.subheader("🩺 Status")
-    health = cached_health(pipe_key, pipe)
+    health = cached_health(pipe_key + repr(llm_key(S)), pipe, engines.llm)
     desc = engines.describe()
     for comp, label in (("embedding", "Embeddings"), ("llm", "LLM")):
         problem = health.get(comp, "")
@@ -304,7 +344,7 @@ with tab_ask:
                     status_box.caption("Searching documents…")
                     try:
                         res = pipe.answer(q, scope, history, on_token=on_token,
-                                          on_status=lambda msg: status_box.caption(msg))
+                                          on_status=lambda msg: status_box.caption(msg), llm=engines.llm)
                     except Exception as e:  # noqa: BLE001
                         res = AnswerResult("error", f"Something went wrong while answering ({type(e).__name__}). "
                                                     "Please try again; if it persists, check the Diagnostics tab.",

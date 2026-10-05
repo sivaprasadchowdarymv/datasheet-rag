@@ -47,6 +47,8 @@ services:
       - app
     environment:
       - DOMAIN=${DOMAIN:?set DOMAIN in .env for HTTPS}
+      - LLM_DOMAIN=${LLM_DOMAIN:-}       # only used by Caddyfile.llm (Implementation 10)
+      - LLM_API_KEY=${LLM_API_KEY:-}
     ports:
       - "80:80"
       - "443:443"
